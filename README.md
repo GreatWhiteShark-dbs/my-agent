@@ -54,7 +54,7 @@ pnpm dev
 
 1. 配置：模型名、接口地址、步数上限
 2. 消息类型：`Message` / `ToolCall` / `Tool`
-3. 工具定义：`read_file` / `write_file` / `run_shell` 和注册表
+3. 工具定义：`read_file` / `write_file` / `edit_file` / `run_shell` 和注册表
 4. `chat`：发一次请求
 5. `runTool`：执行一次工具调用
 6. `runTurn`：一轮对话的循环，`main` 是终端入口
@@ -71,4 +71,3 @@ pnpm dev
 - 消息落盘，支持重放
 - 上下文裁剪，避免历史无限增长
 - 请求超时和重试
-- edit_file：精准替换，比整文件重写省 token

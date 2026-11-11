@@ -91,6 +91,37 @@ const writeFileTool: Tool = {
   },
 }
 
+const editFileTool: Tool = {
+  name: 'edit_file',
+  description: '把文件里的一段原文替换成新文本，原文必须唯一匹配',
+  parameters: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: '文件路径' },
+      old_string: { type: 'string', description: '要被替换的原文，必须在文件中唯一出现' },
+      new_string: { type: 'string', description: '替换成的新文本' },
+    },
+    required: ['path', 'old_string', 'new_string'],
+    additionalProperties: false,
+  },
+  async execute(args) {
+    const path = typeof args.path === 'string' ? args.path : ''
+    const oldString = typeof args.old_string === 'string' ? args.old_string : ''
+    const newString = typeof args.new_string === 'string' ? args.new_string : ''
+    const content = await readFile(path, 'utf8')
+    const count = content.split(oldString).length - 1
+    if (count === 0) {
+      throw new Error('old_string 在文件里不存在，先 read_file 看看实际内容')
+    }
+    // 多处匹配时不知道模型想改哪处，宁可报错让它给更长的原文
+    if (count > 1) {
+      throw new Error(`old_string 匹配到 ${count} 处，把原文写长一点保证唯一`)
+    }
+    await writeFile(path, content.replace(oldString, newString), 'utf8')
+    return `已修改 ${path}`
+  },
+}
+
 const runShellTool: Tool = {
   name: 'run_shell',
   description: '在 shell 里执行命令并返回输出',
@@ -110,7 +141,7 @@ const runShellTool: Tool = {
   },
 }
 
-const tools: Tool[] = [readFileTool, writeFileTool, runShellTool]
+const tools: Tool[] = [readFileTool, writeFileTool, editFileTool, runShellTool]
 
 // 给模型的只有 schema，execute 留在本地
 const toolSchemas = tools.map(tool => ({
@@ -221,7 +252,7 @@ async function runTurn(messages: Message[], input: string): Promise<string> {
   throw new Error(`超过 ${MAX_STEPS} 步仍未结束，已中断本轮`)
 }
 
-const SYSTEM_PROMPT = '你是运行在终端里的最小 agent。读文件用 read_file，写文件用 write_file，跑命令用 run_shell。其他情况直接回答，保持简短。'
+const SYSTEM_PROMPT = '你是运行在终端里的最小 agent。读文件用 read_file，新建或整文件重写用 write_file，改文件里的一段用 edit_file，跑命令用 run_shell。其他情况直接回答，保持简短。'
 
 async function main(): Promise<void> {
   if (API_KEY === undefined || API_KEY === '') {
