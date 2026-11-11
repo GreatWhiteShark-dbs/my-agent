@@ -1,8 +1,20 @@
 import { createInterface } from 'node:readline/promises'
 import { stdin, stdout } from 'node:process'
 
-const MODEL = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat'
-const BASE_URL = (process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com').replace(/\/$/, '')
+const providers: Record<string, { baseUrl: string; model: string }> = {
+  kimi: { baseUrl: 'https://api.kimi.com/coding/v1', model: 'k3.1-pro-highspeed' },
+  deepseek: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' },
+}
+const PROVIDER = process.env.PROVIDER ?? 'kimi'
+const preset = providers[PROVIDER]
+if (preset === undefined) {
+  throw new Error(`没有 ${PROVIDER} 这家，在 providers 里加一下`)
+}
+
+const MODEL = process.env.MODEL ?? preset.model
+const BASE_URL = (process.env.BASE_URL ?? preset.baseUrl).replace(/\/$/, '')
+// API_KEY 优先，没有再按 provider 找
+const API_KEY = process.env.API_KEY ?? process.env[`${PROVIDER.toUpperCase()}_API_KEY`]
 // 防止模型反复调用工具停不下来。
 const MAX_STEPS = 8
 
@@ -26,9 +38,15 @@ interface Tool {
   execute(args: Record<string, unknown>): Promise<string> | string
 }
 
+interface Usage {
+  prompt_tokens: number
+  completion_tokens: number
+}
+
 interface ChatReply {
   content: string | null
   tool_calls?: ToolCall[]
+  usage?: Usage
 }
 
 const echoTool: Tool = {
@@ -61,16 +79,15 @@ const toolSchemas = tools.map(tool => ({
 }))
 
 async function chat(messages: Message[]): Promise<ChatReply> {
-  const apiKey = process.env.DEEPSEEK_API_KEY
-  if (apiKey === undefined || apiKey === '') {
-    throw new Error('缺少 DEEPSEEK_API_KEY：在项目根目录的 .env 里写入 DEEPSEEK_API_KEY=你的key')
+  if (API_KEY === undefined || API_KEY === '') {
+    throw new Error(`缺少 key：在 .env 里写 ${PROVIDER.toUpperCase()}_API_KEY=你的key`)
   }
 
   const response = await fetch(`${BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${API_KEY}`,
     },
     body: JSON.stringify({
       model: MODEL,
@@ -84,11 +101,15 @@ async function chat(messages: Message[]): Promise<ChatReply> {
     throw new Error(`模型请求失败 ${response.status}: ${await response.text()}`)
   }
 
-  const data = (await response.json()) as { choices?: { message?: ChatReply }[] }
+  const data = (await response.json()) as {
+    choices?: { message?: ChatReply }[]
+    usage?: Usage
+  }
   const reply = data.choices?.[0]?.message
   if (reply === undefined) {
     throw new Error('模型返回中没有 message')
   }
+  reply.usage = data.usage
   return reply
 }
 
@@ -119,8 +140,19 @@ async function runTool(call: ToolCall): Promise<string> {
 async function runTurn(messages: Message[], input: string): Promise<string> {
   messages.push({ role: 'user', content: input })
 
+  let promptTotal = 0
+  let completionTotal = 0
+
   for (let step = 1; step <= MAX_STEPS; step += 1) {
     const reply = await chat(messages)
+
+    if (reply.usage !== undefined) {
+      promptTotal += reply.usage.prompt_tokens
+      completionTotal += reply.usage.completion_tokens
+      console.log(
+        `  [tokens] 第${step}圈 输入${reply.usage.prompt_tokens} / 输出${reply.usage.completion_tokens}`,
+      )
+    }
 
     // assistant 先入历史，tool 结果要靠它里面的 id 配对
     messages.push({
@@ -130,6 +162,9 @@ async function runTurn(messages: Message[], input: string): Promise<string> {
     })
 
     if (reply.tool_calls === undefined || reply.tool_calls.length === 0) {
+      console.log(
+        `  [tokens] 本轮共${promptTotal + completionTotal}（输入${promptTotal} / 输出${completionTotal}）`,
+      )
       return reply.content ?? ''
     }
 
@@ -145,8 +180,8 @@ async function runTurn(messages: Message[], input: string): Promise<string> {
 const SYSTEM_PROMPT = '你是运行在终端里的最小 agent。用户要求回显文本时必须调用 echo 工具；其他情况直接回答，保持简短。'
 
 async function main(): Promise<void> {
-  if (process.env.DEEPSEEK_API_KEY === undefined || process.env.DEEPSEEK_API_KEY === '') {
-    console.error('缺少 DEEPSEEK_API_KEY：在项目根目录的 .env 里写入 DEEPSEEK_API_KEY=你的key，然后重新启动。')
+  if (API_KEY === undefined || API_KEY === '') {
+    console.error(`缺少 key：在 .env 里写 ${PROVIDER.toUpperCase()}_API_KEY=你的key，然后重新启动。`)
     process.exitCode = 1
     return
   }
@@ -154,9 +189,11 @@ async function main(): Promise<void> {
   const messages: Message[] = [{ role: 'system', content: SYSTEM_PROMPT }]
   const rl = createInterface({ input: stdin, output: stdout })
 
-  console.log('最小 agent 已启动。输入 /exit 退出。')
+  console.log(`最小 agent 已启动（${PROVIDER} / ${MODEL}）。输入 /exit 退出。`)
   while (true) {
-    const line = (await rl.question('\n你 > ')).trim()
+    // 管道喂输入时 EOF 会把 readline 关掉，question 直接炸，退出去就好
+    const line = await rl.question('\n你 > ').then(text => text.trim()).catch(() => null)
+    if (line === null) break
     if (line === '') continue
     if (line === '/exit') break
 

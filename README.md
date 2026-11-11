@@ -5,7 +5,7 @@
 ## 环境
 
 - Node.js >= 22.19（可以直接运行 `.ts`，不需要额外编译）
-- DeepSeek API Key
+- 任意 OpenAI 兼容接口的 Key（Kimi、DeepSeek 都试过）
 
 ## 运行
 
@@ -13,18 +13,20 @@
 pnpm install
 ```
 
-在项目根目录创建 `.env`，写入：
+在项目根目录创建 `.env`，写入对应家的 key：
 
 ```
-DEEPSEEK_API_KEY=你的key
+KIMI_API_KEY=你的key
+# 或者 DEEPSEEK_API_KEY=你的key
 ```
 
-可选覆盖：
+内置了 kimi 和 deepseek 两家的地址和模型名，`PROVIDER` 一行切换，默认 kimi：
 
 ```
-DEEPSEEK_MODEL=deepseek-chat
-DEEPSEEK_BASE_URL=https://api.deepseek.com
+PROVIDER=deepseek
 ```
+
+key 各家放各的，切换时不用动。想换型号或自建端点，再用 `MODEL` / `BASE_URL` 覆盖。
 
 启动：
 
@@ -43,6 +45,8 @@ pnpm dev
 ```
 
 终端里出现 `[工具] echo(...)`，说明模型确实发起了工具调用，而不是自己编了答案。
+
+每圈请求都会打印 token 用量，工具调得越多，后面几圈的输入越大。
 
 ## 结构
 
