@@ -1,6 +1,10 @@
 import { createInterface } from 'node:readline/promises'
 import { stdin, stdout } from 'node:process'
 import { readFile, writeFile } from 'node:fs/promises'
+import { exec } from 'node:child_process'
+import { promisify } from 'node:util'
+
+const execAsync = promisify(exec)
 
 const providers: Record<string, { baseUrl: string; model: string }> = {
   kimi: { baseUrl: 'https://api.kimi.com/coding/v1', model: 'k3.1-pro-highspeed' },
@@ -50,23 +54,6 @@ interface ChatReply {
   usage?: Usage
 }
 
-const echoTool: Tool = {
-  name: 'echo',
-  description: '回显文本',
-  parameters: {
-    type: 'object',
-    properties: {
-      text: { type: 'string', description: '要回显的文本' },
-    },
-    required: ['text'],
-    additionalProperties: false,
-  },
-  execute(args) {
-    const text = typeof args.text === 'string' ? args.text : ''
-    return `echo: ${text}`
-  },
-}
-
 const readFileTool: Tool = {
   name: 'read_file',
   description: '读取本地文件内容',
@@ -104,7 +91,26 @@ const writeFileTool: Tool = {
   },
 }
 
-const tools: Tool[] = [echoTool, readFileTool, writeFileTool]
+const runShellTool: Tool = {
+  name: 'run_shell',
+  description: '在 shell 里执行命令并返回输出',
+  parameters: {
+    type: 'object',
+    properties: {
+      command: { type: 'string', description: '要执行的命令' },
+    },
+    required: ['command'],
+    additionalProperties: false,
+  },
+  async execute(args) {
+    const command = typeof args.command === 'string' ? args.command : ''
+    // 命令卡住不能拖死整个 agent，10 秒够跑大多数测试了
+    const { stdout, stderr } = await execAsync(command, { timeout: 10_000 })
+    return [stdout, stderr].filter(Boolean).join('\n') || '(无输出)'
+  },
+}
+
+const tools: Tool[] = [readFileTool, writeFileTool, runShellTool]
 
 // 给模型的只有 schema，execute 留在本地
 const toolSchemas = tools.map(tool => ({
@@ -215,7 +221,7 @@ async function runTurn(messages: Message[], input: string): Promise<string> {
   throw new Error(`超过 ${MAX_STEPS} 步仍未结束，已中断本轮`)
 }
 
-const SYSTEM_PROMPT = '你是运行在终端里的最小 agent。读文件用 read_file，写文件用 write_file，回显文本用 echo。其他情况直接回答，保持简短。'
+const SYSTEM_PROMPT = '你是运行在终端里的最小 agent。读文件用 read_file，写文件用 write_file，跑命令用 run_shell。其他情况直接回答，保持简短。'
 
 async function main(): Promise<void> {
   if (API_KEY === undefined || API_KEY === '') {
