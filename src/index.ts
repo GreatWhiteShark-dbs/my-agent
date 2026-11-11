@@ -1,5 +1,6 @@
 import { createInterface } from 'node:readline/promises'
 import { stdin, stdout } from 'node:process'
+import { readFile } from 'node:fs/promises'
 
 const providers: Record<string, { baseUrl: string; model: string }> = {
   kimi: { baseUrl: 'https://api.kimi.com/coding/v1', model: 'k3.1-pro-highspeed' },
@@ -66,7 +67,24 @@ const echoTool: Tool = {
   },
 }
 
-const tools: Tool[] = [echoTool]
+const readFileTool: Tool = {
+  name: 'read_file',
+  description: '读取本地文件内容',
+  parameters: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: '文件路径' },
+    },
+    required: ['path'],
+    additionalProperties: false,
+  },
+  execute(args) {
+    const path = typeof args.path === 'string' ? args.path : ''
+    return readFile(path, 'utf8')
+  },
+}
+
+const tools: Tool[] = [echoTool, readFileTool]
 
 // 给模型的只有 schema，execute 留在本地
 const toolSchemas = tools.map(tool => ({
@@ -177,7 +195,7 @@ async function runTurn(messages: Message[], input: string): Promise<string> {
   throw new Error(`超过 ${MAX_STEPS} 步仍未结束，已中断本轮`)
 }
 
-const SYSTEM_PROMPT = '你是运行在终端里的最小 agent。用户要求回显文本时必须调用 echo 工具；其他情况直接回答，保持简短。'
+const SYSTEM_PROMPT = '你是运行在终端里的最小 agent。需要读取本地文件时用 read_file；用户要求回显文本时必须调用 echo 工具；其他情况直接回答，保持简短。'
 
 async function main(): Promise<void> {
   if (API_KEY === undefined || API_KEY === '') {
