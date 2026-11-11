@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline/promises'
 import { stdin, stdout } from 'node:process'
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 
 const providers: Record<string, { baseUrl: string; model: string }> = {
   kimi: { baseUrl: 'https://api.kimi.com/coding/v1', model: 'k3.1-pro-highspeed' },
@@ -84,7 +84,27 @@ const readFileTool: Tool = {
   },
 }
 
-const tools: Tool[] = [echoTool, readFileTool]
+const writeFileTool: Tool = {
+  name: 'write_file',
+  description: '把内容写入本地文件（不存在则创建，存在则覆盖）',
+  parameters: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: '文件路径' },
+      content: { type: 'string', description: '要写入的完整内容' },
+    },
+    required: ['path', 'content'],
+    additionalProperties: false,
+  },
+  async execute(args) {
+    const path = typeof args.path === 'string' ? args.path : ''
+    const content = typeof args.content === 'string' ? args.content : ''
+    await writeFile(path, content, 'utf8')
+    return `已写入 ${path}（${content.length} 字符）`
+  },
+}
+
+const tools: Tool[] = [echoTool, readFileTool, writeFileTool]
 
 // 给模型的只有 schema，execute 留在本地
 const toolSchemas = tools.map(tool => ({
@@ -195,7 +215,7 @@ async function runTurn(messages: Message[], input: string): Promise<string> {
   throw new Error(`超过 ${MAX_STEPS} 步仍未结束，已中断本轮`)
 }
 
-const SYSTEM_PROMPT = '你是运行在终端里的最小 agent。需要读取本地文件时用 read_file；用户要求回显文本时必须调用 echo 工具；其他情况直接回答，保持简短。'
+const SYSTEM_PROMPT = '你是运行在终端里的最小 agent。读文件用 read_file，写文件用 write_file，回显文本用 echo。其他情况直接回答，保持简短。'
 
 async function main(): Promise<void> {
   if (API_KEY === undefined || API_KEY === '') {
